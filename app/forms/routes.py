@@ -1,11 +1,22 @@
 import json
 import uuid
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask import (
+    Blueprint,
+    Response,
+    current_app,
+    flash,
+    redirect,
+    render_template,
+    request,
+    stream_with_context,
+    url_for,
+)
 from flask_login import current_user, login_required
 from sqlalchemy import func
 
 from app.extensions import db, limiter
+from app.forms.csv_export import export_filename, iter_csv_rows
 from app.forms.validation import QUESTION_TYPES, validate_answers, validate_questions
 from app.mail import send_email
 from app.models import Form, Submission
@@ -139,48 +150,40 @@ def responses(form_id):
 @forms.get("/forms/<int:form_id>/export-csv")
 @login_required
 def export_csv(form_id):
-    import csv
-    import io
-    from flask import Response
-
     form = owned_form(form_id)
-    submissions = (
-        Submission.query.filter_by(form_id=form.id)
-        .order_by(Submission.submitted_at.desc())
-        .all()
-    )
-
     questions = form.questions or []
-    question_ids = [q["id"] for q in questions]
-    question_titles = [q.get("title", q["id"]) for q in questions]
+    question_ids = [question["id"] for question in questions]
+    header = ["Submission ID", "Submitted At (UTC)", "Respondent Email"] + [
+        question.get("title", question["id"]) for question in questions
+    ]
+    target_form_id = form.id
 
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["Submission ID", "Submitted At (UTC)", "Respondent Email"] + question_titles)
+    def rows():
+        yield header
+        submissions = db.session.scalars(
+            db.select(Submission)
+            .where(Submission.form_id == target_form_id)
+            .order_by(Submission.submitted_at.desc(), Submission.id.desc())
+            .execution_options(yield_per=500)
+        )
+        for submission in submissions:
+            answers = submission.answers or {}
+            yield [
+                submission.id,
+                submission.submitted_at.strftime("%Y-%m-%d %H:%M:%S"),
+                submission.respondent_email,
+                *(answers.get(question_id) for question_id in question_ids),
+            ]
 
-    for sub in submissions:
-        ans = sub.answers or {}
-        row = [
-            sub.id,
-            sub.submitted_at.strftime("%Y-%m-%d %H:%M:%S"),
-            sub.respondent_email or "",
-        ]
-        for qid in question_ids:
-            val = ans.get(qid, "")
-            if isinstance(val, list):
-                row.append(", ".join(str(v) for v in val))
-            else:
-                row.append(str(val) if val is not None else "")
-        writer.writerow(row)
-
-    output.seek(0)
-    safe_title = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in form.title)[:30]
-    filename = f"responses_{form.id}_{safe_title}.csv"
-    return Response(
-        output.getvalue(),
-        mimetype="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    response = Response(
+        stream_with_context(iter_csv_rows(rows())),
+        content_type="text/csv; charset=utf-8",
     )
+    filename = export_filename(form.id, form.title)
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @forms.get("/forms/<int:form_id>/responses/<int:submission_id>")

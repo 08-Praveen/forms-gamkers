@@ -2,6 +2,9 @@
 Comprehensive Test Suite for Forms Gamkers.
 Validates the full application lifecycle, security, RBAC, form builder, and CSV export.
 """
+import codecs
+import csv
+import io
 import json
 import os
 import sys
@@ -23,7 +26,7 @@ class FormsGamkersTestCase(unittest.TestCase):
             "TESTING": True,
             "WTF_CSRF_ENABLED": False,
             "RATELIMIT_ENABLED": False,
-            "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+            "SQLALCHEMY_DATABASE_URI": os.getenv("TEST_DATABASE_URL", "sqlite:///:memory:"),
             "SECRET_KEY": "gamkers-test-secret-key-32-bytes-long",
             "APPLICATION_BASE_URL": "http://localhost:5000",
             "SMTP_ENCRYPTION_KEY": "rZ1Hn1Z5Q_4C2v1h5T-cK9qN7fE3jP0wX6sB4vM8lD8=",
@@ -268,6 +271,71 @@ class FormsGamkersTestCase(unittest.TestCase):
         }, follow_redirects=True)
         self.assertEqual(res.status_code, 200)
         self.assertIn(b"Workspace", res.data)
+
+    def test_10_csv_export_neutralises_formula_injection(self):
+        """CSV export prefixes formula-like cells with ' (CWE-1236) and sets safe headers."""
+        self.test_02_signup_and_workspace_creation()
+        questions = json.dumps([
+            {"id": "email", "title": "Your Email", "type": "email", "required": True, "options": []},
+            {"id": "payload", "title": "=HYPERLINK(\"http://evil.test\")", "type": "short_text", "required": True, "options": []},
+            {"id": "tags", "title": "Tags", "type": "checkbox", "required": False, "options": ["-risky", "safe"]},
+        ])
+        res = self.client.post("/forms/new", data={
+            "title": "தமிழ் Injection Test",
+            "description": "CSV injection regression test.",
+            "confirmation_subject": "Thanks {email}",
+            "confirmation_body": "Thanks",
+            "publish": "yes",
+            "questions": questions,
+        }, follow_redirects=True)
+        self.assertEqual(res.status_code, 200)
+        form = Form.query.filter_by(title="தமிழ் Injection Test").first()
+        self.assertIsNotNone(form)
+
+        payloads = ["=cmd|'/C calc'!A0", "@SUM(1+1)", "+12345-1", "-2+3"]
+        anon = self.app.test_client()
+        with patch("app.forms.routes.send_email", return_value=True):
+            for index, payload in enumerate(payloads):
+                res = anon.post(f"/f/{form.public_id}", data={
+                    "email": f"respondent{index}@gamkers.in",
+                    "payload": payload,
+                    "tags": ["-risky", "safe"],
+                })
+                self.assertEqual(res.status_code, 200)
+            res = anon.post(f"/f/{form.public_id}", data={
+                "email": "=evil@example.com",
+                "payload": "Plain answer",
+                "tags": ["safe", "-risky"],
+            })
+            self.assertEqual(res.status_code, 200)
+
+        res = self.client.get(f"/forms/{form.id}/export.csv")
+        body = res.data  # Always consume streamed bodies so the request context closes.
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.headers["Content-Type"], "text/csv; charset=utf-8")
+        self.assertEqual(res.headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(res.headers["Cache-Control"], "no-store")
+        disposition = res.headers["Content-Disposition"]
+        self.assertTrue(disposition.isascii())
+        self.assertEqual(disposition, f'attachment; filename="responses_{form.id}_Injection_Test.csv"')
+        self.assertTrue(body.startswith(codecs.BOM_UTF8))
+
+        rows = list(csv.reader(io.StringIO(body.decode("utf-8-sig"))))
+        self.assertEqual(
+            rows[0],
+            ["Submission ID", "Submitted At (UTC)", "Respondent Email", "Your Email", "'=HYPERLINK(\"http://evil.test\")", "Tags"],
+        )
+        data_rows = rows[1:]
+        self.assertEqual(len(data_rows), len(payloads) + 1)
+        payload_cells = {row[4] for row in data_rows}
+        for payload in payloads:
+            self.assertIn("'" + payload, payload_cells)
+            self.assertNotIn(payload, payload_cells)
+        by_email = {row[2]: row for row in data_rows}
+        self.assertIn("'=evil@example.com", by_email)
+        self.assertEqual(by_email["'=evil@example.com"][3], "'=evil@example.com")
+        self.assertEqual(by_email["'=evil@example.com"][5], "safe, -risky")
+        self.assertEqual(by_email["respondent0@gamkers.in"][5], "'-risky, safe")
 
 
 if __name__ == "__main__":

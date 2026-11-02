@@ -19,6 +19,15 @@ def create_app(test_config=None):
     elif not app.config.get("SECRET_KEY"):
         raise RuntimeError("Set SECRET_KEY before starting the application.")
 
+    # Must run before db.init_app(): Flask-SQLAlchemy builds the engine there.
+    # QueuePool-only options crash SQLite's StaticPool, so add them for MySQL only.
+    if app.config["SQLALCHEMY_DATABASE_URI"].startswith("mysql"):
+        engine_options = dict(app.config.get("SQLALCHEMY_ENGINE_OPTIONS") or {})
+        engine_options.setdefault("pool_size", 5)
+        engine_options.setdefault("max_overflow", 5)
+        engine_options.setdefault("pool_timeout", 20)
+        app.config["SQLALCHEMY_ENGINE_OPTIONS"] = engine_options
+
     db.init_app(app)
     migrate.init_app(app, db)
     login_manager.init_app(app)
