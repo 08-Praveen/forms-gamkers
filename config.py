@@ -7,6 +7,12 @@ class Config:
         "DATABASE_URL", "sqlite:///forms_gamkers.db"
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    # Valid for every SQLAlchemy pool class, including SQLite's StaticPool used by tests.
+    # MySQL-only QueuePool sizing is added in app.create_app(); see there.
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        "pool_pre_ping": True,  # Test each pooled connection before use (MySQL error 2006).
+        "pool_recycle": 280,  # Replace connections before a 300 s server wait_timeout.
+    }
     MAX_CONTENT_LENGTH = 256 * 1024
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
