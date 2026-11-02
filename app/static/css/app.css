@@ -29,6 +29,9 @@ button { cursor: pointer; }
 .brand { display: inline-flex; gap: 9px; align-items: center; font-size: 13px; font-weight: 850; letter-spacing: .12em; white-space: nowrap; }
 .brand-mark { color: var(--green); font-size: 21px; line-height: 1; }
 .brand-suffix { color: var(--muted); font-size: 10px; letter-spacing: .18em; border-left: 1px solid var(--border-bright); padding-left: 9px; }
+.brand-logo-img { width: 30px; height: 30px; object-fit: contain; border-radius: 6px; vertical-align: middle; transition: transform .18s ease, filter .18s ease; }
+.brand:hover .brand-logo-img { transform: scale(1.08); filter: drop-shadow(0 0 10px rgba(40, 232, 117, 0.6)); }
+.brand-logo-img-sm { width: 18px; height: 18px; object-fit: contain; border-radius: 4px; vertical-align: middle; }
 .site-nav { display: flex; gap: 28px; align-items: center; color: #b6beb7; font-size: 13px; }
 .nav-identity { color: var(--muted); }
 .inline-form { display: inline; }

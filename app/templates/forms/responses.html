@@ -3,7 +3,12 @@
 {% block content %}
 <section class="workspace-wrap">
   <div class="editor-heading"><div><a class="back-link" href="{{ url_for('main.dashboard') }}">← Workspace</a><p class="eyebrow">FORM RESPONSES</p><h1>{{ form.title }}</h1></div><a class="button button-outline button-small" href="{{ url_for('forms.edit_form', form_id=form.id) }}">Edit form</a></div>
-  <div class="response-summary"><strong>{{ submissions|length }}</strong><span>total responses</span></div>
+  <div class="response-summary" style="display:flex;justify-content:space-between;align-items:center;">
+    <div><strong>{{ submissions|length }}</strong> <span>total responses</span></div>
+    {% if submissions %}
+      <a class="button button-primary button-small" href="{{ url_for('forms.export_csv', form_id=form.id) }}">Export CSV ↓</a>
+    {% endif %}
+  </div>
   {% if submissions %}
     <div class="table-wrap"><table><thead><tr><th>Submitted</th><th>Respondent</th><th>Email delivery</th><th></th></tr></thead><tbody>
       {% for submission in submissions %}<tr><td>{{ submission.submitted_at.strftime('%b %d, %Y · %H:%M') }} UTC</td><td>{{ submission.respondent_email or '—' }}</td><td><span class="badge {{ 'badge-live' if submission.email_status == 'sent' else 'badge-draft' }}">{{ submission.email_status|replace('_',' ')|title }}</span></td><td><a href="{{ url_for('forms.response_detail', form_id=form.id, submission_id=submission.id) }}">View →</a></td></tr>{% endfor %}
