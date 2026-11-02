@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Response received · Forms Gamkers{% endblock %}
+{% block content %}
+<section class="submitted-wrap panel">
+  <span class="submitted-check">✓</span><p class="eyebrow">RESPONSE RECEIVED</p><h1>Thanks for sharing.</h1>
+  <p class="muted">Your response has been submitted successfully.</p>
+  {% if email_status == 'sent' %}<p class="delivery-note">A confirmation email is on its way.</p>
+  {% elif email_status == 'failed' %}<p class="delivery-note">Your response was saved, but we couldn't send the confirmation email. Please contact the organisation if you need confirmation.</p>
+  {% elif email_status == 'not_configured' %}<p class="delivery-note">Your response was saved. The organisation has not configured email delivery yet.</p>{% endif %}
+</section>
+{% endblock %}

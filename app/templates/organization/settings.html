@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Organisation settings · Forms Gamkers{% endblock %}
+{% block content %}
+<section class="workspace-wrap settings-wrap">
+  <p class="eyebrow">WORKSPACE SETTINGS</p><h1>Organisation</h1><p class="muted">Update the details your team and respondents see.</p>
+  <div class="settings-nav"><a class="active" href="{{ url_for('organization.settings') }}">Organisation</a><a href="{{ url_for('organization.email_settings') }}">Email delivery</a><a href="{{ url_for('organization.team') }}">Team</a></div>
+  <form class="panel settings-panel" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <p class="eyebrow">ORGANISATION DETAILS</p>
+    <label class="field-label" for="name">Organisation name</label><input id="name" name="name" value="{{ request.form.get('name', organization.name) }}" maxlength="160" required>
+    <label class="field-label" for="website">Website <span class="muted">(optional)</span></label><input id="website" name="website" type="url" value="{{ request.form.get('website', organization.website or '') }}" maxlength="255" placeholder="https://example.com">
+    <div class="settings-actions"><button class="button button-primary" type="submit">Save changes</button></div>
+  </form>
+</section>
+{% endblock %}

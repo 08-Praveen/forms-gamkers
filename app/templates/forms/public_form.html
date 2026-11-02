@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}{{ form.title }} · {{ form.organization.name }}{% endblock %}
+{% block content %}
+<section class="public-form-wrap">
+  <div class="public-form-brand"><span class="brand-mark">✳</span> {{ form.organization.name }}</div>
+  <form class="public-form panel" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="public-form-accent"></div>
+    <p class="eyebrow">A FORM FROM {{ form.organization.name|upper }}</p><h1>{{ form.title }}</h1>
+    {% if form.description %}<p class="public-description">{{ form.description }}</p>{% endif %}
+    {% for question in form.questions %}
+      <fieldset class="public-question">
+        <legend>{{ question.title }}{% if question.required %} <span class="required-star" aria-label="required">*</span>{% endif %}</legend>
+        {% if question.type == 'long_text' %}
+          <textarea name="{{ question.id }}" rows="4" maxlength="5000" {% if question.required %}required{% endif %}></textarea>
+        {% elif question.type in ['choice', 'checkbox'] %}
+          <div class="choice-list">
+          {% for option in question.options %}
+            <label class="choice-label"><input type="{{ 'radio' if question.type == 'choice' else 'checkbox' }}" name="{{ question.id }}" value="{{ option }}" {% if question.required and loop.first %}required{% endif %}><span>{{ option }}</span></label>
+          {% endfor %}
+          </div>
+        {% else %}
+          <input name="{{ question.id }}" type="{{ {'short_text':'text','email':'email','number':'number','date':'date'}[question.type] }}" maxlength="5000" {% if question.required %}required{% endif %}>
+        {% endif %}
+      </fieldset>
+    {% endfor %}
+    <button class="button button-primary button-full" type="submit">Submit response <span>↗</span></button>
+    <p class="public-privacy">Your response is shared with {{ form.organization.name }}.</p>
+  </form>
+  <p class="powered-by">Forms by <span class="brand-mark">✳</span> GAMKERS</p>
+</section>
+{% endblock %}

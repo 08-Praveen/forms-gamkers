@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Forms Gamkers — Create. Collect. Confirm.{% endblock %}
+{% block content %}
+<section class="hero-shell">
+  <div class="hero-grid"></div>
+  <div class="hero-copy">
+    <p class="eyebrow"><span class="status-dot"></span> FORMS BUILT FOR TEAMS</p>
+    <h1>Collect responses.<br><span class="accent-text">Own the follow-up.</span></h1>
+    <p class="hero-description">Create thoughtful forms, bring your organisation together, and send a personal confirmation email the moment a response arrives.</p>
+    <div class="hero-actions">
+      <a class="button button-primary" href="{{ url_for('auth.signup') }}">Build your first form <span aria-hidden="true">↗</span></a>
+      <a class="button button-quiet" href="#features">Explore the platform <span aria-hidden="true">↓</span></a>
+    </div>
+    <div class="hero-proof"><span class="proof-check">✓</span> Your workspace. Your data. Your email settings.</div>
+  </div>
+  <div class="hero-card" aria-label="Example form preview">
+    <div class="preview-top"><span class="preview-indicator"></span><span>LIVE FORM PREVIEW</span><span class="preview-menu">•••</span></div>
+    <div class="preview-content">
+      <p class="preview-label">GET IN TOUCH</p>
+      <h2>Let's build something good.</h2>
+      <p class="preview-description">Tell us a little about what you need. We'll be in touch shortly.</p>
+      <label>Your name <span>*</span><div class="preview-input">Alex Morgan</div></label>
+      <label>Email address <span>*</span><div class="preview-input">alex@company.com</div></label>
+      <label>What can we help with?<div class="preview-input preview-message">Choose an option <span>⌄</span></div></label>
+      <div class="preview-submit">Send response <span>↗</span></div>
+    </div>
+    <div class="preview-confirm"><span>✓</span> Confirmation email sends automatically</div>
+  </div>
+  <div class="hero-orbit orbit-one"></div><div class="hero-orbit orbit-two"></div>
+</section>
+<section class="feature-section" id="features">
+  <div class="section-heading">
+    <p class="eyebrow">ONE WORKSPACE. EVERY RESPONSE.</p>
+    <h2>Less chasing.<br><span class="accent-text">More doing.</span></h2>
+    <p>Everything your team needs to turn a blank page into a better way to collect information.</p>
+  </div>
+  <div class="feature-grid">
+    <article class="feature-card"><span class="feature-icon">01</span><h3>Forms your way</h3><p>Build surveys, registrations, feedback forms and more with flexible question types and a simple editor.</p></article>
+    <article class="feature-card"><span class="feature-icon">02</span><h3>Instant confirmation</h3><p>Write your own subject and message. Respondents get a personal confirmation email right after submitting.</p></article>
+    <article class="feature-card"><span class="feature-icon">03</span><h3>One team workspace</h3><p>Keep forms and responses in your organisation, with clear admin and member roles.</p></article>
+    <article class="feature-card"><span class="feature-icon">04</span><h3>Your SMTP, your brand</h3><p>Admins configure organisation email delivery and manage team and workspace settings.</p></article>
+  </div>
+</section>
+<section class="cta-band">
+  <div><p class="eyebrow">YOUR NEXT GREAT FORM STARTS HERE</p><h2>Make every response count.</h2></div>
+  <a class="button button-primary" href="{{ url_for('auth.signup') }}">Create your workspace <span>↗</span></a>
+</section>
+{% endblock %}

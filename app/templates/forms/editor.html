@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit ' ~ form.title if form else 'New form' }} · Forms Gamkers{% endblock %}
+{% block head %}<script src="{{ url_for('static', filename='js/form-builder.js') }}" defer></script>{% endblock %}
+{% block content %}
+<section class="editor-wrap">
+  <div class="editor-heading"><div><a class="back-link" href="{{ url_for('main.dashboard') }}">← Workspace</a><p class="eyebrow">FORM BUILDER</p><h1>{{ 'Edit your form' if form else 'Create a form' }}</h1></div>
+    {% if form and form.is_published %}<a class="button button-outline button-small" href="{{ url_for('forms.public_form', public_id=form.public_id) }}" target="_blank" rel="noopener">Open live form ↗</a>{% endif %}
+  </div>
+  <form class="editor-form" method="post" id="form-editor" data-questions="{{ (initial_questions if initial_questions is defined else (form.questions if form else []))|tojson|forceescape }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="questions" id="questions-data">
+    <div class="panel editor-panel">
+      <p class="eyebrow">FORM DETAILS</p>
+      <label class="field-label" for="title">Form title</label><input id="title" name="title" maxlength="180" required value="{{ request.form.get('title', form.title if form else '') }}">
+      <label class="field-label" for="description">Description</label><textarea id="description" name="description" rows="3" maxlength="5000">{{ request.form.get('description', form.description if form else '') }}</textarea>
+    </div>
+    <div class="editor-section-heading"><div><p class="eyebrow">BUILD YOUR QUESTIONS</p><h2>Questions</h2></div><button class="button button-outline button-small" type="button" id="add-question">＋ Add question</button></div>
+    <div id="question-list" class="question-list" aria-live="polite"></div>
+    <div class="panel editor-panel email-editor">
+      <p class="eyebrow">AUTOMATIC FOLLOW-UP</p><h2>Confirmation email</h2><p class="muted">The first email question is used as the recipient. Use {email} or a question ID such as {name} in your message.</p>
+      <label class="field-label" for="confirmation_subject">Email subject</label><input id="confirmation_subject" name="confirmation_subject" maxlength="200" required value="{{ request.form.get('confirmation_subject', form.confirmation_subject if form else 'Thanks for your response') }}">
+      <label class="field-label" for="confirmation_body">Email message</label><textarea id="confirmation_body" name="confirmation_body" rows="6" maxlength="5000" required>{{ request.form.get('confirmation_body', form.confirmation_body if form else 'Hi {email},\n\nThanks for submitting our form. We have received your response.') }}</textarea>
+    </div>
+    <div class="editor-actions"><a class="button button-quiet" href="{{ url_for('main.dashboard') }}">Cancel</a><button class="button button-outline" name="publish" value="no" type="submit">Save draft</button><button class="button button-primary" name="publish" value="yes" type="submit">Publish form <span>↗</span></button></div>
+  </form>
+  {% if form %}<form class="delete-form" action="{{ url_for('forms.delete_form', form_id=form.id) }}" method="post" data-confirm="Delete this form and all of its responses? This cannot be undone."><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-danger button-small" type="submit">Delete form</button></form>{% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Workspace · Forms Gamkers{% endblock %}
+{% block content %}
+<section class="workspace-wrap">
+  <div class="workspace-heading">
+    <div><p class="eyebrow">YOUR WORKSPACE / {{ current_user.organization.name|upper }}</p><h1>Good to have you back, <span class="accent-text">{{ current_user.name.split(' ')[0] }}.</span></h1><p class="muted">Create forms, gather responses, and keep your team moving.</p></div>
+    <a class="button button-primary" href="{{ url_for('forms.create_form') }}">＋ Create a form</a>
+  </div>
+  <div class="stat-grid">
+    <div class="stat-card"><span>YOUR FORMS</span><strong>{{ forms|length }}</strong><small>Across this organisation</small></div>
+    <div class="stat-card"><span>RESPONSES</span><strong>{{ total_responses }}</strong><small>Collected across all forms</small></div>
+    <div class="stat-card"><span>TEAM MEMBERS</span><strong>{{ member_count }}</strong><small>In your organisation</small></div>
+  </div>
+  <div class="section-title-row"><div><p class="eyebrow">YOUR WORK</p><h2>Forms</h2></div></div>
+  {% if forms %}
+    <div class="form-list">
+      {% for form in forms %}
+        <article class="form-list-item">
+          <div class="form-list-icon">✳</div>
+          <div class="form-list-main"><h3><a href="{{ url_for('forms.edit_form', form_id=form.id) }}">{{ form.title }}</a></h3><p>{{ form.description or 'No description yet.' }}</p><span class="form-list-meta">{{ response_counts.get(form.id, 0) }} responses · Updated {{ form.updated_at.strftime('%b %d, %Y') }}</span></div>
+          <span class="badge {{ 'badge-live' if form.is_published else 'badge-draft' }}">{{ 'Published' if form.is_published else 'Draft' }}</span>
+          {% if form.is_published %}<a class="button button-outline button-small" href="{{ url_for('forms.public_form', public_id=form.public_id) }}" target="_blank" rel="noopener">Open ↗</a>{% endif %}
+          <a class="button button-quiet button-small" href="{{ url_for('forms.responses', form_id=form.id) }}">Responses</a>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="empty-state"><div class="empty-mark">✳</div><h3>Your first form starts here.</h3><p>Create a form, set up your confirmation email, and share it with the world.</p><a class="button button-primary" href="{{ url_for('forms.create_form') }}">Create your first form <span>↗</span></a></div>
+  {% endif %}
+</section>
+{% endblock %}
