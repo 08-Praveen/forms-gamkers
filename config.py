@@ -3,9 +3,12 @@ import os
 
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY")
-    SQLALCHEMY_DATABASE_URI = os.getenv(
-        "DATABASE_URL", "sqlite:///forms_gamkers.db"
-    )
+    DB_HOST = os.getenv("DB_HOST")
+    DB_PORT = os.getenv("DB_PORT", "3306")
+    DB_NAME = os.getenv("DB_NAME")
+    DB_USER = os.getenv("DB_USER")
+    DB_PASSWORD = os.getenv("DB_PASSWORD")
+    SQLALCHEMY_DATABASE_URI = None
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     # Valid for every SQLAlchemy pool class, including SQLite's StaticPool used by tests.
     # MySQL-only QueuePool sizing is added in app.create_app(); see there.
@@ -13,7 +16,7 @@ class Config:
         "pool_pre_ping": True,  # Test each pooled connection before use (MySQL error 2006).
         "pool_recycle": 280,  # Replace connections before a 300 s server wait_timeout.
     }
-    MAX_CONTENT_LENGTH = 256 * 1024
+    MAX_CONTENT_LENGTH = 16 * 1024 * 1024
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     SESSION_COOKIE_SECURE = os.getenv("SECURE_COOKIES", "0") == "1"
@@ -24,6 +27,9 @@ class Config:
     RATELIMIT_HEADERS_ENABLED = True
     SMTP_ENCRYPTION_KEY = os.getenv("SMTP_ENCRYPTION_KEY")
     APPLICATION_BASE_URL = os.getenv("APPLICATION_BASE_URL")
+    CERTIFICATE_STORAGE_PATH = os.getenv("CERTIFICATE_STORAGE_PATH")
+    CERTIFICATE_MAX_RECORDS = int(os.getenv("CERTIFICATE_MAX_RECORDS", "500"))
+    EMAIL_CSS_PATH = os.getenv("EMAIL_CSS_PATH")
     DEFAULT_SMTP_HOST = os.getenv("SMTP_HOST")
     DEFAULT_SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
     DEFAULT_SMTP_USERNAME = os.getenv("SMTP_USERNAME")

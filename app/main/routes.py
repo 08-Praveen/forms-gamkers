@@ -2,8 +2,9 @@ from flask import Blueprint, redirect, render_template, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import func
 
+from app.auth.models import User
 from app.extensions import db
-from app.models import Form, Submission, User
+from app.forms.models import Form, Submission
 
 main = Blueprint("main", __name__)
 

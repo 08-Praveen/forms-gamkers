@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <body class="mail-page">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+      <tr>
+        <td align="center">
+          <table class="mail-card" role="presentation" width="600" cellspacing="0" cellpadding="0">
+            <tr>
+              <td class="mail-header">
+                <span class="mail-brand"><span>✳</span> GAMKERS FORMS</span>
+              </td>
+            </tr>
+            <tr>
+              <td class="mail-body">
+                <h1 class="mail-title">{{ organization_name }}</h1>
+                <div class="mail-copy">{{ message_html }}</div>
+                {% if event_details %}
+                  <div class="mail-event">
+                    <p class="mail-event-label">EVENT DETAILS</p>
+                    <p class="mail-event-title">{{ event_title }}</p>
+                    {% if event_details.date %}
+                      <p class="mail-event-row"><strong>DATE &amp; TIME</strong>{{ event_details.date }} · {{ event_details.start_time }}{% if event_details.end_time %}–{{ event_details.end_time }}{% endif %} {{ event_details.timezone_label }} <span>({{ event_details.timezone }})</span></p>
+                    {% endif %}
+                    {% if event_details.location %}<p class="mail-event-row"><strong>LOCATION</strong>{{ event_details.location }}</p>{% endif %}
+                    <div class="mail-actions">
+                      {% if event_url %}<a class="mail-action" href="{{ event_url }}">View event details</a>{% endif %}
+                      {% if calendar_url %}<a class="mail-calendar-link" href="{{ calendar_url }}">Add to Google Calendar</a>{% endif %}
+                    </div>
+                    {% if calendar_url %}<p class="mail-event-note">A calendar invitation is also attached. Times are shown in {{ event_details.timezone }}.</p>{% endif %}
+                  </div>
+                {% endif %}
+              </td>
+            </tr>
+            <tr>
+              <td class="mail-footer">
+                This message was sent by {{ organization_name }} using Forms Gamkers.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

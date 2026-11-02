@@ -1,5 +1,8 @@
 import json
 import uuid
+from datetime import datetime, timedelta
+from html import escape
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from flask import (
     Blueprint,
@@ -17,9 +20,11 @@ from sqlalchemy import func
 
 from app.extensions import db, limiter
 from app.forms.csv_export import export_filename, iter_csv_rows
+from app.forms.models import Form, Submission
 from app.forms.validation import QUESTION_TYPES, validate_answers, validate_questions
 from app.mail import send_email
-from app.models import Form, Submission
+from app.urls import absolute_app_url
+from app.utils import utcnow
 
 
 forms = Blueprint("forms", __name__)
@@ -68,6 +73,18 @@ def render_editor(form, status=400):
     ), status
 
 
+def parse_event_time(value, field_name):
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError(f"Enter a valid event {field_name}.") from error
+    if parsed.tzinfo is not None:
+        raise ValueError(f"Enter the event {field_name} in the selected timezone.")
+    return parsed
+
+
 @forms.route("/forms/new", methods=["GET", "POST"])
 @login_required
 def create_form():
@@ -80,6 +97,26 @@ def create_form():
 @login_required
 def edit_form(form_id):
     form = owned_form(form_id)
+    if form.closed_at:
+        feedback_form = (
+            db.session.scalar(db.select(Form).where(Form.parent_form_id == form.id))
+            if not form.parent_form_id
+            else None
+        )
+        parent_form = db.session.get(Form, form.parent_form_id) if form.parent_form_id else None
+        return render_template(
+            "forms/closed_admin.html",
+            form=form,
+            feedback_form=feedback_form,
+            parent_form=parent_form,
+            feedback_url=(
+                absolute_app_url(
+                    "forms.public_form", public_id=feedback_form.public_id
+                )
+                if feedback_form
+                else None
+            ),
+        )
     if request.method == "POST":
         return save_form(form)
     return render_template("forms/editor.html", form=form)
@@ -90,6 +127,9 @@ def save_form(form):
     description = request.form.get("description", "").strip()
     subject = request.form.get("confirmation_subject", "").strip()
     body = request.form.get("confirmation_body", "").strip()
+    confirmation_format = request.form.get("confirmation_format", "text")
+    event_timezone = request.form.get("event_timezone", "Asia/Kolkata").strip()
+    event_location = request.form.get("event_location", "").strip()
     if not title or len(title) > 180 or len(description) > 5000:
         flash("Enter a title and a description under 5,000 characters.", "error")
         return render_editor(form)
@@ -99,12 +139,47 @@ def save_form(form):
     if not body or len(body) > 5000:
         flash("Enter a confirmation email message under 5,000 characters.", "error")
         return render_editor(form)
+    if confirmation_format not in {"text", "html", "markdown"}:
+        flash("Choose a supported confirmation email format.", "error")
+        return render_editor(form)
+    if len(event_timezone) > 64 or len(event_location) > 255:
+        flash("Enter a valid event timezone and a location under 255 characters.", "error")
+        return render_editor(form)
+    try:
+        ZoneInfo(event_timezone)
+        event_start_at = parse_event_time(
+            request.form.get("event_start_at", "").strip(), "start time"
+        )
+        event_end_at = parse_event_time(
+            request.form.get("event_end_at", "").strip(), "end time"
+        )
+    except (ValueError, ZoneInfoNotFoundError) as error:
+        flash(str(error).strip() or "Enter a valid IANA event timezone.", "error")
+        return render_editor(form)
+    if event_end_at and not event_start_at:
+        flash("Set an event start time before adding an end time.", "error")
+        return render_editor(form)
+    if event_start_at and event_end_at and event_end_at <= event_start_at:
+        flash("The event end time must be after its start time.", "error")
+        return render_editor(form)
+    if event_start_at:
+        event_zone = ZoneInfo(event_timezone)
+        for value, label in ((event_start_at, "start"), (event_end_at, "end")):
+            if value and value.replace(tzinfo=event_zone).astimezone(
+                ZoneInfo("UTC")
+            ).astimezone(event_zone).replace(tzinfo=None) != value:
+                flash(f"The event {label} time does not exist in this timezone.", "error")
+                return render_editor(form)
     try:
         questions = validate_questions(request.form.get("questions", ""))
     except ValueError as error:
         flash(str(error), "error")
         return render_editor(form)
-    should_publish = request.form.get("publish") == "yes"
+    should_publish = (
+        form.is_published or request.form.get("publish") == "yes"
+        if form
+        else request.form.get("publish") == "yes"
+    )
     if should_publish and not any(
         question["type"] == "email" and question["required"] for question in questions
     ):
@@ -121,6 +196,11 @@ def save_form(form):
     form.questions = questions
     form.confirmation_subject = subject
     form.confirmation_body = body
+    form.confirmation_format = confirmation_format
+    form.event_start_at = event_start_at
+    form.event_end_at = event_end_at
+    form.event_timezone = event_timezone
+    form.event_location = event_location or None
     form.is_published = should_publish
     db.session.add(form)
     db.session.commit()
@@ -128,10 +208,91 @@ def save_form(form):
     return redirect(url_for("forms.edit_form", form_id=form.id))
 
 
+@forms.post("/forms/<int:form_id>/close")
+@login_required
+def close_form(form_id):
+    form = owned_form(form_id)
+    if not form.is_published or form.closed_at:
+        flash("Only open, published forms can be closed.", "error")
+        return redirect(url_for("forms.edit_form", form_id=form.id))
+    message = request.form.get("closed_message", "").strip()
+    if not message or len(message) > 2000:
+        flash("Enter a form-closed message of up to 2,000 characters.", "error")
+        return redirect(url_for("forms.edit_form", form_id=form.id))
+    feedback_questions = [
+        {
+            "id": "certificate_name",
+            "title": "Full name for your certificate",
+            "type": "short_text",
+            "required": True,
+            "options": [],
+        },
+        {
+            "id": "college_name",
+            "title": "Institution or organisation",
+            "type": "short_text",
+            "required": True,
+            "options": [],
+        },
+        {
+            "id": "email",
+            "title": "Email address",
+            "type": "email",
+            "required": True,
+            "options": [],
+        },
+        {
+            "id": "rating",
+            "title": "How would you rate this event?",
+            "type": "choice",
+            "required": True,
+            "options": ["Excellent", "Good", "Average", "Needs improvement"],
+        },
+        {
+            "id": "feedback",
+            "title": "What did you think of the event?",
+            "type": "long_text",
+            "required": False,
+            "options": [],
+        },
+    ]
+    if not form.parent_form_id:
+        feedback_form = Form(
+            organization_id=form.organization_id,
+            creator_id=current_user.id,
+            parent_form_id=form.id,
+            title=f"{form.title[:166]} — Feedback",
+            description="Share your feedback and tell us how you would like your certificate details to appear.",
+            public_id=uuid.uuid4().hex,
+            questions=feedback_questions,
+            confirmation_subject=f"Thanks for your feedback — {form.title[:130]}",
+            confirmation_body=(
+                "Hello {certificate_name},\n\n"
+                "Thank you for sharing your feedback on {form_title}. "
+                "Your response has been received."
+            ),
+            confirmation_format="text",
+            is_published=True,
+        )
+        db.session.add(feedback_form)
+    form.closed_at = utcnow()
+    form.closed_message = message
+    db.session.commit()
+    flash(
+        "Feedback form is ready to share." if not form.parent_form_id else "Feedback form closed.",
+        "success",
+    )
+    return redirect(url_for("forms.edit_form", form_id=form.id))
+
+
 @forms.post("/forms/<int:form_id>/delete")
 @login_required
 def delete_form(form_id):
     form = owned_form(form_id)
+    if not form.parent_form_id:
+        feedback_form = Form.query.filter_by(parent_form_id=form.id).first()
+        if feedback_form:
+            db.session.delete(feedback_form)
     db.session.delete(form)
     db.session.commit()
     flash("Form and its responses deleted.", "success")
@@ -152,10 +313,23 @@ def responses(form_id):
 def export_csv(form_id):
     form = owned_form(form_id)
     questions = form.questions or []
-    question_ids = [question["id"] for question in questions]
-    header = ["Submission ID", "Submitted At (UTC)", "Respondent Email"] + [
-        question.get("title", question["id"]) for question in questions
-    ]
+    is_feedback_form = bool(form.parent_form_id)
+    if is_feedback_form:
+        question_ids = None
+        header = [
+            "name",
+            "college_name",
+            "email",
+            "rating",
+            "feedback",
+            "submission_id",
+            "submitted_at_utc",
+        ]
+    else:
+        question_ids = [question["id"] for question in questions]
+        header = ["Submission ID", "Submitted At (UTC)", "Respondent Email"] + [
+            question.get("title", question["id"]) for question in questions
+        ]
     target_form_id = form.id
 
     def rows():
@@ -168,12 +342,24 @@ def export_csv(form_id):
         )
         for submission in submissions:
             answers = submission.answers or {}
-            yield [
-                submission.id,
-                submission.submitted_at.strftime("%Y-%m-%d %H:%M:%S"),
-                submission.respondent_email,
-                *(answers.get(question_id) for question_id in question_ids),
-            ]
+            submitted_at = submission.submitted_at.strftime("%Y-%m-%d %H:%M:%S")
+            if is_feedback_form:
+                yield [
+                    answers.get("certificate_name"),
+                    answers.get("college_name"),
+                    answers.get("email") or submission.respondent_email,
+                    answers.get("rating"),
+                    answers.get("feedback"),
+                    submission.id,
+                    submitted_at,
+                ]
+            else:
+                yield [
+                    submission.id,
+                    submitted_at,
+                    submission.respondent_email,
+                    *(answers.get(question_id) for question_id in question_ids),
+                ]
 
     response = Response(
         stream_with_context(iter_csv_rows(rows())),
@@ -200,11 +386,18 @@ def response_detail(form_id, submission_id):
 @forms.route("/f/<public_id>", methods=["GET", "POST"])
 @limiter.limit("20 per minute", methods=["POST"])
 def public_form(public_id):
-    form = db.session.scalar(
-        db.select(Form).where(Form.public_id == public_id, Form.is_published.is_(True))
-    )
-    if not form:
+    form = db.session.scalar(db.select(Form).where(Form.public_id == public_id))
+    if not form or (not form.is_published and not form.closed_at):
         return render_template("errors/404.html"), 404
+    if form.closed_at:
+        feedback_form = db.session.scalar(
+            db.select(Form).where(Form.parent_form_id == form.id)
+        )
+        return render_template(
+            "forms/closed.html",
+            form=form,
+            feedback_form=feedback_form,
+        )
     if request.method == "GET":
         return render_template("forms/public_form.html", form=form)
     try:
@@ -216,8 +409,9 @@ def public_form(public_id):
     db.session.add(submission)
     db.session.commit()
 
-    email_status = "not_configured"
-    if recipient:
+    is_feedback_form = bool(form.parent_form_id)
+    email_status = "skipped" if is_feedback_form else "not_configured"
+    if recipient and not is_feedback_form:
         subject = form.confirmation_subject.replace("{email}", recipient)
         body = form.confirmation_body
         for question in form.questions:
@@ -225,15 +419,76 @@ def public_form(public_id):
             replacement = ", ".join(value) if isinstance(value, list) else str(value)
             subject = subject.replace("{" + question["id"] + "}", replacement)
             body = body.replace("{" + question["id"] + "}", replacement)
+        event_date = (
+            form.event_start_at.strftime("%d %B %Y") if form.event_start_at else ""
+        )
+        event_time = ""
+        if form.event_start_at:
+            event_time = form.event_start_at.strftime("%I:%M %p")
+            if form.event_end_at:
+                event_time += f"–{form.event_end_at.strftime('%I:%M %p')}"
+            event_time += f" {form.event_timezone}"
+        for placeholder, value in {
+            "event_date": event_date,
+            "event_time": event_time,
+            "event_location": form.event_location or "",
+        }.items():
+            subject = subject.replace("{" + placeholder + "}", value)
+            body = body.replace("{" + placeholder + "}", value)
         if "\r" in subject or "\n" in subject:
             subject = "Thanks for your response"
         body = body.replace("{email}", recipient)
+        body = body.replace("{form_title}", form.title)
         try:
-            sent = send_email(recipient, subject, body, form.organization)
+            email_args = (recipient, subject, body, form.organization)
+            event_details = None
+            calendar_event = None
+            event_url = None
+            if form.event_start_at or form.event_location:
+                event_url = absolute_app_url("forms.public_form", public_id=form.public_id)
+                event_details = {
+                    "location": form.event_location,
+                    "timezone": form.event_timezone,
+                }
+                if form.event_start_at:
+                    timezone = ZoneInfo(form.event_timezone)
+                    event_details.update(
+                        date=form.event_start_at.strftime("%A, %d %B %Y"),
+                        start_time=form.event_start_at.strftime("%I:%M %p"),
+                        end_time=(
+                            form.event_end_at.strftime("%I:%M %p")
+                            if form.event_end_at
+                            else None
+                        ),
+                        timezone_label=form.event_start_at.replace(tzinfo=timezone).tzname(),
+                    )
+                    calendar_event = {
+                        "uid": f"form-{form.id}@forms.gamkers",
+                        "title": form.title,
+                        "start": form.event_start_at,
+                        "end": form.event_end_at
+                        or form.event_start_at + timedelta(hours=1),
+                        "timezone": form.event_timezone,
+                        "location": form.event_location or "",
+                        "description": form.description,
+                        "url": event_url,
+                    }
+            if event_details:
+                sent = send_email(
+                    *email_args,
+                    content_format=form.confirmation_format,
+                    event_details=event_details,
+                    event_url=event_url,
+                    calendar_event=calendar_event,
+                )
+            elif form.confirmation_format == "text":
+                sent = send_email(*email_args)
+            else:
+                sent = send_email(*email_args, form.confirmation_format)
             email_status = "sent" if sent else "not_configured"
         except Exception:
             current_app.logger.exception("Form confirmation email delivery failed.")
             email_status = "failed"
-        submission.email_status = email_status
-        db.session.commit()
+    submission.email_status = email_status
+    db.session.commit()
     return render_template("forms/submitted.html", email_status=email_status)

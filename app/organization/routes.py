@@ -6,9 +6,11 @@ from sqlalchemy import func
 
 from app.extensions import db, limiter
 from app.mail import send_email
-from app.models import Invitation, Organization, User, utcnow
+from app.auth.models import Invitation, User
+from app.organization.models import Organization
 from app.security import encrypt_smtp_password, hash_token, new_token, valid_email
 from app.urls import absolute_app_url
+from app.utils import utcnow
 
 organization = Blueprint("organization", __name__)
 

@@ -1,0 +1,519 @@
+import csv
+import io
+import json
+from datetime import datetime
+from pathlib import Path
+from types import SimpleNamespace
+from urllib.parse import urlparse
+
+import pytest
+
+from app.certificates.services import read_recipients
+from app.extensions import db
+from app.mail import _calendar_invite, _calendar_url, _styled_email, send_email
+from app.models import CertificateBatch, CertificateRecord, Form, Submission
+
+
+def _register(client):
+    return client.post(
+        "/signup",
+        data={
+            "name": "Event Admin",
+            "organization": "Northstar Events",
+            "email": "event-admin@example.com",
+            "password": "safe-test-password-2026",
+        },
+        follow_redirects=True,
+    )
+
+
+def _published_event(client):
+    questions = [
+        {
+            "id": "email",
+            "title": "Email",
+            "type": "email",
+            "required": True,
+            "options": [],
+        },
+        {
+            "id": "name",
+            "title": "Name",
+            "type": "short_text",
+            "required": True,
+            "options": [],
+        },
+    ]
+    client.post(
+        "/forms/new",
+        data={
+            "title": "Security Summit",
+            "questions": json.dumps(questions),
+            "confirmation_subject": "You're registered for {form_title}",
+            "confirmation_body": "Hello {name}",
+            "confirmation_format": "markdown",
+            "publish": "yes",
+        },
+    )
+    return Form.query.filter_by(title="Security Summit").first()
+
+
+def test_application_requires_mysql_connection_settings(monkeypatch):
+    from app import create_app
+    from config import Config
+
+    monkeypatch.setattr(Config, "SECRET_KEY", "test-secret")
+    monkeypatch.setattr(Config, "SQLALCHEMY_DATABASE_URI", None)
+    monkeypatch.setattr(Config, "DB_HOST", None)
+    monkeypatch.setattr(Config, "DB_PORT", "3306")
+    monkeypatch.setattr(Config, "DB_NAME", None)
+    monkeypatch.setattr(Config, "DB_USER", None)
+    monkeypatch.setattr(Config, "DB_PASSWORD", None)
+    with pytest.raises(RuntimeError, match="DB_HOST"):
+        create_app()
+
+
+def test_mysql_connection_settings_escape_password_special_characters():
+    from app import create_app
+    from sqlalchemy.engine import make_url
+
+    app = create_app(
+        {
+            "SECRET_KEY": "test-secret",
+            "DB_HOST": "db.example",
+            "DB_PORT": "3307",
+            "DB_NAME": "forms_db",
+            "DB_USER": "forms_user",
+            "DB_PASSWORD": "safe:@/password?#",
+        }
+    )
+    database_url = make_url(app.config["SQLALCHEMY_DATABASE_URI"])
+    assert database_url.drivername == "mysql+pymysql"
+    assert database_url.host == "db.example"
+    assert database_url.port == 3307
+    assert database_url.database == "forms_db"
+    assert database_url.username == "forms_user"
+    assert database_url.password == "safe:@/password?#"
+    assert database_url.query["charset"] == "utf8mb4"
+
+
+def test_published_forms_save_changes_without_republishing_or_unpublishing(client):
+    _register(client)
+    event_form = _published_event(client)
+
+    editor = client.get(f"/forms/{event_form.id}/edit")
+    assert b"Save changes" in editor.data
+    assert b"Publish form" not in editor.data
+
+    questions = [
+        {
+            "id": "email",
+            "title": "Email",
+            "type": "email",
+            "required": True,
+            "options": [],
+        },
+        {
+            "id": "name",
+            "title": "Name",
+            "type": "short_text",
+            "required": True,
+            "options": [],
+        },
+    ]
+    response = client.post(
+        f"/forms/{event_form.id}/edit",
+        data={
+            "title": "Security Summit Updated",
+            "questions": json.dumps(questions),
+            "confirmation_subject": "Thanks",
+            "confirmation_body": "Thanks {name}",
+            "confirmation_format": "markdown",
+        },
+    )
+    assert response.status_code == 302
+    db.session.refresh(event_form)
+    assert event_form.is_published
+    assert event_form.title == "Security Summit Updated"
+
+
+def test_closing_registration_creates_feedback_form_and_generates_permanent_certificates(
+    app, client, tmp_path, monkeypatch
+):
+    app.config["CERTIFICATE_STORAGE_PATH"] = str(tmp_path / "private-certificates")
+    mailed = []
+    feedback_mail = []
+    monkeypatch.setattr(
+        "app.certificates.services.send_email",
+        lambda *args: mailed.append(args) or True,
+    )
+    monkeypatch.setattr(
+        "app.forms.routes.send_email",
+        lambda *args, **kwargs: feedback_mail.append((args, kwargs)) or True,
+    )
+    _register(client)
+    event_form = _published_event(client)
+    response = client.post(
+        f"/forms/{event_form.id}/close",
+        data={"closed_message": "Registration is closed. Thank you."},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"Copy link" in response.data
+
+    feedback_form = Form.query.filter_by(parent_form_id=event_form.id).one()
+    assert feedback_form.is_published
+    assert len(feedback_form.questions) == 5
+
+    closed_page = client.get(f"/f/{event_form.public_id}")
+    assert b"Registration is closed. Thank you." in closed_page.data
+    assert feedback_form.public_id.encode() in closed_page.data
+    closed_post = client.post(
+        f"/f/{event_form.public_id}",
+        data={"name": "late attendee", "email": "late@example.com"},
+    )
+    assert b"Registration is closed" in closed_post.data
+    assert Submission.query.filter_by(form_id=event_form.id).count() == 0
+
+    response = client.post(
+        f"/f/{feedback_form.public_id}",
+        data={
+            "certificate_name": "Alex Attendee",
+            "college_name": "Northstar Institute",
+            "email": "alex@example.com",
+            "rating": "Excellent",
+            "feedback": "Great workshop!",
+        },
+    )
+    assert response.status_code == 200
+    feedback_submission = Submission.query.filter_by(form_id=feedback_form.id).one()
+    assert feedback_submission.email_status == "skipped"
+    assert feedback_mail == []
+    feedback_csv = client.get(f"/forms/{feedback_form.id}/export.csv")
+    rows = list(
+        csv.DictReader(io.StringIO(feedback_csv.data.decode("utf-8-sig")))
+    )
+    assert rows[0]["name"] == "Alex Attendee"
+    assert rows[0]["college_name"] == "Northstar Institute"
+    assert rows[0]["email"] == "alex@example.com"
+    assert rows[0]["rating"] == "Excellent"
+    assert read_recipients(
+        io.BytesIO(feedback_csv.data), f"feedback_{feedback_form.id}.csv"
+    )[0] == {
+        "name": "Alex Attendee",
+        "college_name": "Northstar Institute",
+        "email": "alex@example.com",
+    }
+
+    response = client.post(
+        f"/certificates/forms/{event_form.id}/generate",
+        data={
+            "title": "Certificate of Participation",
+            "description": "Presented to {name} from {college_name}. No. {certificate_number}.",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    certificate = CertificateRecord.query.one()
+    batch = CertificateBatch.query.one()
+    assert batch.generated_records == 1
+    assert certificate.recipient_name == "Alex Attendee"
+    assert certificate.notification_status == "sent"
+    assert len(mailed) == 1
+    assert mailed[0][0] == "alex@example.com"
+    assert certificate.public_token in mailed[0][2]
+    assert certificate.pdf_path
+    pdf_path = Path(app.config["CERTIFICATE_STORAGE_PATH"]) / certificate.pdf_path
+    assert pdf_path.is_file()
+    assert pdf_path.read_bytes().startswith(b"%PDF")
+    assert b"/Subtype /Image" in pdf_path.read_bytes()
+
+    public_page = client.get(f"/certificates/public/{certificate.public_token}")
+    assert b"Alex Attendee" in public_page.data
+    assert (
+        f"/certificates/public/{certificate.public_token}/pdf".encode()
+        in public_page.data
+    )
+    assert b"<iframe" in public_page.data
+    public_pdf = client.get(f"/certificates/public/{certificate.public_token}/pdf")
+    assert public_pdf.status_code == 200
+    assert public_pdf.data.startswith(b"%PDF")
+    assert public_pdf.headers["X-Frame-Options"] == "SAMEORIGIN"
+    assert "frame-ancestors 'self'" in public_pdf.headers["Content-Security-Policy"]
+    downloaded_pdf = client.get(
+        f"/certificates/public/{certificate.public_token}/download"
+    )
+    assert downloaded_pdf.status_code == 200
+    assert downloaded_pdf.data == public_pdf.data == pdf_path.read_bytes()
+
+    second_batch = client.post(
+        f"/certificates/forms/{event_form.id}/generate",
+        data={"title": "Duplicate", "description": "No duplicate."},
+        follow_redirects=True,
+    )
+    assert b"No eligible feedback responses" in second_batch.data
+    assert CertificateRecord.query.count() == 1
+
+
+def test_uploaded_recipient_preview_generation_and_exports_are_tenant_scoped(
+    app, client, tmp_path, monkeypatch
+):
+    app.config["CERTIFICATE_STORAGE_PATH"] = str(tmp_path / "private-certificates")
+    monkeypatch.setattr("app.certificates.services.send_email", lambda *args: False)
+    _register(client)
+    response = client.post(
+        "/certificates/upload",
+        data={
+            "recipient_file": (
+                io.BytesIO(
+                    b"name,college_name,email\nTaylor Example,Northstar Institute,taylor@example.com\n"
+                ),
+                "recipients.csv",
+            )
+        },
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 302
+    preview_url = urlparse(response.headers["Location"]).path
+    preview = client.get(preview_url)
+    assert b"Taylor Example" in preview.data
+    upload_id = preview_url.rsplit("/", 1)[-1]
+
+    response = client.post(
+        f"/certificates/uploads/{upload_id}/generate",
+        data={
+            "title": "Workshop certificate",
+            "description": "Awarded to {name} at {college_name}.",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    batch = CertificateBatch.query.one()
+    assert batch.source_filename == "recipients.csv"
+    record = CertificateRecord.query.one()
+    assert record.recipient_email == "taylor@example.com"
+    assert record.notification_status == "not_configured"
+    assert CertificateBatch.query.count() == 1
+
+    csv_export = client.get(f"/certificates/batches/{batch.id}/export.csv")
+    assert csv_export.status_code == 200
+    assert b"taylor" not in csv_export.data
+    assert b"/certificates/public/" in csv_export.data
+    xlsx_export = client.get(f"/certificates/batches/{batch.id}/export.xlsx")
+    assert xlsx_export.status_code == 200
+    assert xlsx_export.mimetype == (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+
+
+def test_recipient_reader_accepts_csv_and_rejects_missing_institution(app):
+    with app.app_context():
+        good = io.BytesIO(b"Student Name,Institution Name\nTaylor Example,Northstar Institute\n")
+        records = read_recipients(good, "participants.csv")
+        assert records == [
+            {
+                "name": "Taylor Example",
+                "college_name": "Northstar Institute",
+                "email": None,
+            }
+        ]
+        bad = io.BytesIO(b"name,email\nTaylor Example,taylor@example.com\n")
+        try:
+            read_recipients(bad, "participants.csv")
+        except ValueError as error:
+            assert "institution column" in str(error)
+        else:
+            raise AssertionError("A recipient file without an institution must be rejected.")
+
+
+def test_confirmation_html_and_markdown_are_sanitised_and_tailwind_styled(app):
+    with app.app_context():
+        organisation = type(
+            "Organisation",
+            (),
+            {
+                "name": "Northstar Events",
+                "smtp_host": "mail.example.com",
+                "smtp_port": 587,
+                "smtp_username": None,
+                "smtp_password_encrypted": None,
+                "smtp_sender": "no-reply@example.com",
+                "smtp_security": "starttls",
+            },
+        )()
+        message, settings, _context = _styled_email(
+            "alex@example.com",
+            "Thanks",
+            "<p>Hello <strong>Alex</strong></p><img src=x onerror=alert(1)>",
+            organisation,
+            "html",
+        )
+        assert settings["host"] == "mail.example.com"
+        assert message.is_multipart()
+        assert message.get_body(preferencelist=("plain",)) is not None
+        html_part = message.get_body(preferencelist=("html",)).get_content()
+        assert "<strong>Alex</strong>" in html_part
+        assert "onerror" not in html_part
+        assert "style=" in html_part
+        assert "var(--" not in html_part
+
+        message, _, _ = _styled_email(
+            "alex@example.com",
+            "Thanks",
+            "**Hello Alex**\n\nWelcome to [the event](javascript:alert(1)).",
+            organisation,
+            "markdown",
+        )
+        html_part = message.get_body(preferencelist=("html",)).get_content()
+        assert "<strong>Hello Alex</strong>" in html_part
+        assert "javascript:" not in html_part
+
+
+def test_registration_confirmation_includes_event_details_and_calendar_links(
+    app, client, monkeypatch
+):
+    _register(client)
+    questions = [
+        {
+            "id": "email",
+            "title": "Email",
+            "type": "email",
+            "required": True,
+            "options": [],
+        }
+    ]
+    response = client.post(
+        "/forms/new",
+        data={
+            "title": "Modern Web Summit",
+            "description": "A full day of talks.",
+            "questions": json.dumps(questions),
+            "confirmation_subject": "You're registered for {form_title}",
+            "confirmation_body": (
+                "Your session is {event_date} at {event_time} in {event_location}."
+            ),
+            "confirmation_format": "text",
+            "event_start_at": "2027-04-15T09:00",
+            "event_end_at": "2027-04-15T17:30",
+            "event_timezone": "Asia/Kolkata",
+            "event_location": "Bengaluru Tech Park",
+            "publish": "yes",
+        },
+    )
+    assert response.status_code == 302
+    event_form = Form.query.filter_by(title="Modern Web Summit").one()
+    sent = []
+
+    def fake_send(*args, **kwargs):
+        sent.append((args, kwargs))
+        return True
+
+    monkeypatch.setattr("app.forms.routes.send_email", fake_send)
+    response = client.post(
+        f"/f/{event_form.public_id}",
+        data={"email": "attendee@example.com"},
+    )
+    assert response.status_code == 200
+    event_kwargs = sent[0][1]
+    assert "15 April 2027" in sent[0][0][2]
+    assert "Bengaluru Tech Park" in sent[0][0][2]
+    assert event_kwargs["event_details"]["date"] == "Thursday, 15 April 2027"
+    assert event_kwargs["event_details"]["location"] == "Bengaluru Tech Park"
+    assert event_kwargs["calendar_event"]["timezone"] == "Asia/Kolkata"
+    assert event_kwargs["event_url"].endswith(event_form.public_id)
+
+
+def test_calendar_confirmation_has_styled_google_link_and_ics_attachment(app, monkeypatch):
+    with app.app_context():
+        organization = SimpleNamespace(
+            name="Northstar Events",
+            smtp_host="mail.example.com",
+            smtp_port=587,
+            smtp_username=None,
+            smtp_password_encrypted=None,
+            smtp_sender="no-reply@example.com",
+            smtp_security="starttls",
+        )
+        calendar_event = {
+            "uid": "event-7@forms.gamkers",
+            "title": "Northstar Summit",
+            "start": datetime(2027, 4, 15, 9),
+            "end": datetime(2027, 4, 15, 10),
+            "timezone": "Asia/Kolkata",
+            "location": "Bengaluru",
+            "description": "A summit",
+            "url": "https://forms.example/f/abc123",
+        }
+        details = {
+            "date": "Thursday, 15 April 2027",
+            "start_time": "09:00 AM",
+            "end_time": "10:00 AM",
+            "timezone": "Asia/Kolkata",
+            "timezone_label": "IST",
+            "location": "Bengaluru",
+        }
+        message, _, _ = _styled_email(
+            "attendee@example.com",
+            "Registration confirmed",
+            "You're registered.",
+            organization,
+            "text",
+            event_details=details,
+            event_title=calendar_event["title"],
+            event_url=calendar_event["url"],
+            calendar_url=_calendar_url(calendar_event),
+        )
+        html_part = message.get_body(preferencelist=("html",)).get_content()
+        assert "Add to Google Calendar" in html_part
+        assert "Bengaluru" in html_part
+        assert "var(--" not in html_part
+
+        invite = _calendar_invite(calendar_event)
+        assert "DTSTART:20270415T033000Z" in invite
+        assert "DTEND:20270415T043000Z" in invite
+        assert "LOCATION:Bengaluru" in invite
+        assert "forms.example/f/abc123" in invite
+
+        sent_messages = []
+
+        class FakeSMTP:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def connect(self, host, port):
+                return 220, b"ready"
+
+            def ehlo(self):
+                return 250, b"ready"
+
+            def starttls(self, context=None):
+                return 220, b"ready"
+
+            def send_message(self, sent_message):
+                sent_messages.append(sent_message)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        monkeypatch.setattr("app.mail.socket.getaddrinfo", lambda *a, **k: [
+            (2, 1, 6, "", ("8.8.8.8", 587))
+        ])
+        monkeypatch.setattr("app.mail.smtplib.SMTP", FakeSMTP)
+        assert send_email(
+            "attendee@example.com",
+            "Registration confirmed",
+            "You're registered.",
+            organization,
+            event_details=details,
+            event_title=calendar_event["title"],
+            event_url=calendar_event["url"],
+            calendar_event=calendar_event,
+        )
+        attachments = list(sent_messages[0].iter_attachments())
+        assert len(attachments) == 1
+        assert attachments[0].get_content_type() == "text/calendar"
+        assert "DTSTART:20270415T033000Z" in attachments[0].get_content()

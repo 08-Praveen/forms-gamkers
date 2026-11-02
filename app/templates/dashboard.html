@@ -18,9 +18,10 @@
         <article class="form-list-item">
           <div class="form-list-icon">✳</div>
           <div class="form-list-main"><h3><a href="{{ url_for('forms.edit_form', form_id=form.id) }}">{{ form.title }}</a></h3><p>{{ form.description or 'No description yet.' }}</p><span class="form-list-meta">{{ response_counts.get(form.id, 0) }} responses · Updated {{ form.updated_at.strftime('%b %d, %Y') }}</span></div>
-          <span class="badge {{ 'badge-live' if form.is_published else 'badge-draft' }}">{{ 'Published' if form.is_published else 'Draft' }}</span>
+          <span class="badge {{ 'badge-live' if form.is_published and not form.closed_at else 'badge-draft' }}">{{ 'Closed' if form.closed_at else ('Published' if form.is_published else 'Draft') }}</span>
           {% if form.is_published %}<a class="button button-outline button-small" href="{{ url_for('forms.public_form', public_id=form.public_id) }}" target="_blank" rel="noopener">Open ↗</a>{% endif %}
           <a class="button button-quiet button-small" href="{{ url_for('forms.responses', form_id=form.id) }}">Responses</a>
+          {% if form.parent_form_id %}<span class="form-list-meta">Feedback form</span>{% endif %}
         </article>
       {% endfor %}
     </div>

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Certificate {{ certificate.certificate_number }} · Gamkers{% endblock %}
+{% block content %}
+<section class="public-certificate-wrap">
+  <div class="panel public-certificate-card">
+    <p class="eyebrow">VERIFIED DIGITAL CERTIFICATE</p>
+    <h1>{{ batch.title }}</h1>
+    <p class="muted">Previewing the exact PDF certificate that will be downloaded.</p>
+    <iframe
+      class="certificate-preview-frame"
+      src="{{ url_for('certificates.public_certificate_pdf', token=certificate.public_token) }}"
+      title="Certificate preview for {{ certificate.recipient_name }}"
+    ></iframe>
+    <a class="button button-primary certificate-download" href="{{ url_for('certificates.download_public_certificate', token=certificate.public_token) }}">Download your certificate <span>↓</span></a>
+    <p class="certificate-number">CERTIFICATE NUMBER <strong>{{ certificate.certificate_number }}</strong></p>
+    <p class="certificate-expiry-note">This verification link does not expire.</p>
+  </div>
+  <p class="powered-by">Issued with <span class="brand-mark">✳</span> Forms Gamkers</p>
+</section>
+{% endblock %}

@@ -7,7 +7,7 @@ def absolute_app_url(endpoint, **values):
     base_url = current_app.config.get("APPLICATION_BASE_URL")
     parsed = urlsplit(base_url or "")
     allowed_schemes = {"https"}
-    if current_app.debug or current_app.testing:
+    if parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}:
         allowed_schemes.add("http")
     if (
         parsed.scheme not in allowed_schemes

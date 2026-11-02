@@ -11,6 +11,8 @@ import sys
 import unittest
 from unittest.mock import patch
 
+from sqlalchemy.engine import URL
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from app import create_app
@@ -22,11 +24,36 @@ from app.security import decrypt_smtp_password, hash_token, new_token
 class FormsGamkersTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        test_database_uri = "sqlite:///:memory:"
+        if os.getenv("TEST_DB_HOST"):
+            test_database_settings = {
+                "TEST_DB_HOST": os.getenv("TEST_DB_HOST"),
+                "TEST_DB_PORT": os.getenv("TEST_DB_PORT", "3306"),
+                "TEST_DB_NAME": os.getenv("TEST_DB_NAME"),
+                "TEST_DB_USER": os.getenv("TEST_DB_USER"),
+                "TEST_DB_PASSWORD": os.getenv("TEST_DB_PASSWORD"),
+            }
+            missing_settings = [
+                name for name, value in test_database_settings.items() if not value
+            ]
+            if missing_settings:
+                raise RuntimeError(
+                    "Set all MySQL test settings: " + ", ".join(missing_settings)
+                )
+            test_database_uri = URL.create(
+                drivername="mysql+pymysql",
+                username=test_database_settings["TEST_DB_USER"],
+                password=test_database_settings["TEST_DB_PASSWORD"],
+                host=test_database_settings["TEST_DB_HOST"],
+                port=int(test_database_settings["TEST_DB_PORT"]),
+                database=test_database_settings["TEST_DB_NAME"],
+                query={"charset": "utf8mb4"},
+            )
         cls.test_config = {
             "TESTING": True,
             "WTF_CSRF_ENABLED": False,
             "RATELIMIT_ENABLED": False,
-            "SQLALCHEMY_DATABASE_URI": os.getenv("TEST_DATABASE_URL", "sqlite:///:memory:"),
+            "SQLALCHEMY_DATABASE_URI": test_database_uri,
             "SECRET_KEY": "gamkers-test-secret-key-32-bytes-long",
             "APPLICATION_BASE_URL": "http://localhost:5000",
             "SMTP_ENCRYPTION_KEY": "rZ1Hn1Z5Q_4C2v1h5T-cK9qN7fE3jP0wX6sB4vM8lD8=",
