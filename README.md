@@ -10,6 +10,9 @@ cybersecurity brand direction.
 - Organisation-scoped workspaces with `org_admin` and `member` roles.
 - Form builder for short/long text, email, number, date, multiple-choice and checkbox questions.
 - Draft/publish controls, public response links and organisation-only response details.
+- CSV export of responses, hardened against spreadsheet formula injection: cells
+  starting with `=`, `+`, `-`, `@`, tab or carriage return are prefixed with `'`
+  (plain numbers are safely preserved without quotes).
 - Custom confirmation email subject/body with `{email}` and question-ID placeholders.
 - Organisation SMTP settings, encrypted SMTP passwords and platform SMTP fallback.
 - CSRF protection, secure password hashing, request-size limits, login/form rate limits,
@@ -71,6 +74,18 @@ production `SECRET_KEY`, `SMTP_ENCRYPTION_KEY`, and `SECURE_COOKIES=1`. Keep all
 secrets in the hosting provider's environment settings, not in source control.
 Back up the MySQL database and test restoration before accepting real responses.
 
+Use MySQL 5.7.8+ or MariaDB 10.2.7+ with InnoDB. Older servers lack the `JSON`
+column type and reject the utf8mb4 unique index on `user.email`. Set the
+database default to `utf8mb4` / `utf8mb4_unicode_ci` **before** creating tables
+(phpMyAdmin → database → **Operations** → **Collation**, or run
+`ALTER DATABASE CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`). Tables
+inherit this default, and a `latin1` database corrupts non-ASCII answers.
+
+The app pings pooled connections before use and recycles them after 280 seconds,
+so shared-host idle timeouts do not surface as `MySQL server has gone away
+(2006)`. On MySQL each process opens at most 10 connections (`pool_size=5`,
+`max_overflow=5`). Keep processes × 10 below the host's `max_user_connections`.
+
 ## cPanel / Passenger WSGI deployment
 
 1. In **Setup Python App**, create a Python 3.11+ application. Keep the project
@@ -95,10 +110,21 @@ Back up the MySQL database and test restoration before accepting real responses.
    - `RATELIMIT_STORAGE_URI`: a shared Redis URL if Redis is available. The
      built-in `memory://` limiter is suitable for local development, not
      multi-process production deployments.
-5. From the cPanel application virtual environment, run
-   `flask --app wsgi db upgrade` once and whenever a reviewed database migration
-   is deployed. Do not expose `.env`, virtualenvs, logs or database backups
-   through the document root.
+   Alternatively, copy `.env.cpanel.example` to `.env` in the project directory
+   (never inside `public_html`) and fill in the same values. The app loads it at startup.
+5. Create the schema once, using one of these options:
+   - **SSH available:** from the cPanel application virtual environment, run
+     `flask --app wsgi db upgrade`. Run it again whenever a reviewed database
+     migration is deployed.
+   - **No SSH (phpMyAdmin only):** select the empty application database, open
+     **Import** and import `deploy/schema_mysql.sql`. It switches the database to
+     utf8mb4, creates every table and records Alembic revision `d6fd79910711`.
+     For later migrations, generate incremental SQL on a development machine with
+     `flask --app wsgi db upgrade <current_revision>:head --sql` (using a
+     `mysql+pymysql://` `DATABASE_URL`) and import that file the same way.
+
+   Do not expose `.env`, virtualenvs, logs or database backups through the
+   document root.
 6. Restart the Passenger application and check its error log. Configure your
    organisation's SMTP account under **Settings → Email delivery** before
    inviting teammates or publishing forms that send confirmations.
@@ -138,4 +164,10 @@ services.
 pytest
 ```
 
-Tests use an isolated in-memory SQLite database and do not send real email.
+Tests use an isolated in-memory SQLite database by default and do not send real
+email. To run the same suite against MySQL or MariaDB, point `TEST_DATABASE_URL`
+at an empty, disposable database (tables are created and dropped for every test):
+
+```text
+TEST_DATABASE_URL='mysql+pymysql://user:pass@127.0.0.1:3306/forms_test?charset=utf8mb4' pytest
+```
