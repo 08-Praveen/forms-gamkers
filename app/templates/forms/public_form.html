@@ -2,7 +2,7 @@
 {% block title %}{{ form.title }} · {{ form.organization.name }}{% endblock %}
 {% block content %}
 <section class="public-form-wrap">
-  <div class="public-form-brand"><span class="brand-mark">✳</span> {{ form.organization.name }}</div>
+  <div class="public-form-brand"><img src="{{ url_for('static', filename='img/logo.png') }}" alt="Gamkers" class="brand-logo-img-sm" style="margin-right:6px;"> {{ form.organization.name }}</div>
   <form class="public-form panel" method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="public-form-accent"></div>
@@ -27,6 +27,6 @@
     <button class="button button-primary button-full" type="submit">Submit response <span>↗</span></button>
     <p class="public-privacy">Your response is shared with {{ form.organization.name }}.</p>
   </form>
-  <p class="powered-by">Forms by <span class="brand-mark">✳</span> GAMKERS</p>
+  <p class="powered-by">Forms by <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Gamkers" class="brand-logo-img-sm" style="display:inline-block;vertical-align:middle;margin:0 4px;"> GAMKERS</p>
 </section>
 {% endblock %}

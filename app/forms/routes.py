@@ -135,6 +135,54 @@ def responses(form_id):
     return render_template("forms/responses.html", form=form, submissions=submissions)
 
 
+@forms.get("/forms/<int:form_id>/export.csv")
+@forms.get("/forms/<int:form_id>/export-csv")
+@login_required
+def export_csv(form_id):
+    import csv
+    import io
+    from flask import Response
+
+    form = owned_form(form_id)
+    submissions = (
+        Submission.query.filter_by(form_id=form.id)
+        .order_by(Submission.submitted_at.desc())
+        .all()
+    )
+
+    questions = form.questions or []
+    question_ids = [q["id"] for q in questions]
+    question_titles = [q.get("title", q["id"]) for q in questions]
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Submission ID", "Submitted At (UTC)", "Respondent Email"] + question_titles)
+
+    for sub in submissions:
+        ans = sub.answers or {}
+        row = [
+            sub.id,
+            sub.submitted_at.strftime("%Y-%m-%d %H:%M:%S"),
+            sub.respondent_email or "",
+        ]
+        for qid in question_ids:
+            val = ans.get(qid, "")
+            if isinstance(val, list):
+                row.append(", ".join(str(v) for v in val))
+            else:
+                row.append(str(val) if val is not None else "")
+        writer.writerow(row)
+
+    output.seek(0)
+    safe_title = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in form.title)[:30]
+    filename = f"responses_{form.id}_{safe_title}.csv"
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @forms.get("/forms/<int:form_id>/responses/<int:submission_id>")
 @login_required
 def response_detail(form_id, submission_id):

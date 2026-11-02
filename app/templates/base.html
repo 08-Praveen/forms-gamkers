@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#070907">
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/logo.png') }}">
   <title>{% block title %}Forms Gamkers{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
   <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
@@ -11,7 +12,7 @@
 </head>
 <body>
   <header class="site-header">
-    <a class="brand" href="{{ url_for('main.home') }}"><span class="brand-mark">✳</span> GAMKERS <span class="brand-suffix">FORMS</span></a>
+    <a class="brand" href="{{ url_for('main.home') }}"><img src="{{ url_for('static', filename='img/logo.png') }}" alt="Gamkers Logo" class="brand-logo-img"> GAMKERS <span class="brand-suffix">FORMS</span></a>
     <nav class="site-nav" aria-label="Main navigation">
       {% if current_user.is_authenticated %}
         <a href="{{ url_for('main.dashboard') }}">Workspace</a>
@@ -44,7 +45,7 @@
     {% block content %}{% endblock %}
   </main>
   <footer class="site-footer">
-    <a class="brand brand-footer" href="{{ url_for('main.home') }}"><span class="brand-mark">✳</span> GAMKERS <span class="brand-suffix">FORMS</span></a>
+    <a class="brand brand-footer" href="{{ url_for('main.home') }}"><img src="{{ url_for('static', filename='img/logo.png') }}" alt="Gamkers Logo" class="brand-logo-img-sm"> GAMKERS <span class="brand-suffix">FORMS</span></a>
     <span>Forms that move your organisation forward.</span>
     <span>© {{ current_year }} Gamkers</span>
   </footer>
