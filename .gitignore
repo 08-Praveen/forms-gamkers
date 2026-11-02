@@ -220,6 +220,7 @@ __marimo__/
 # Local application state
 .env
 instance/
+node_modules/
 tests/
 *.db
 *.sqlite
