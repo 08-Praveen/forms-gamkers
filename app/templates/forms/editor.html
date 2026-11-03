@@ -6,6 +6,15 @@
   <div class="editor-heading"><div><a class="back-link" href="{{ url_for('main.dashboard') }}">← Workspace</a><p class="eyebrow">FORM BUILDER</p><h1>{{ 'Edit your form' if form else 'Create a form' }}</h1></div>
     {% if form and form.is_published %}<a class="button button-outline button-small" href="{{ url_for('forms.public_form', public_id=form.public_id) }}" target="_blank" rel="noopener">Open live form ↗</a>{% endif %}
   </div>
+  <details class="editor-help panel" open>
+    <summary><span class="editor-help-icon">?</span><span><strong>New to the form builder?</strong><small>Open this guide for a quick explanation of each step.</small></span><b class="editor-help-chevron">⌄</b></summary>
+    <div class="editor-help-content">
+      <div><span>01</span><h3>Name your form</h3><p>Use a short title and explain why someone should complete it.</p></div>
+      <div><span>02</span><h3>Add questions</h3><p>Choose an answer type. Short answer is for a few words; long answer is for details; multiple choice lets people select one option; checkboxes allow several selections.</p></div>
+      <div><span>03</span><h3>Set up confirmation</h3><p>Ask for an email address if you want to send a confirmation. Write a friendly subject and message.</p></div>
+      <div><span>04</span><h3>Save or publish</h3><p>Save draft to continue later. Publish when the questions and confirmation message are ready to share.</p></div>
+    </div>
+  </details>
   <form class="editor-form" method="post" id="form-editor" data-questions="{{ (initial_questions if initial_questions is defined else (form.questions if form else []))|tojson|forceescape }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="questions" id="questions-data">
     <div class="panel editor-panel">
@@ -28,6 +37,7 @@
     </div>
     <div class="editor-section-heading"><div><p class="eyebrow">BUILD YOUR QUESTIONS</p><h2>Questions</h2></div><button class="button button-outline button-small" type="button" id="add-question">＋ Add question</button></div>
     <div id="question-list" class="question-list" aria-live="polite"></div>
+    <p class="editor-inline-tip"><span>✦</span> Beginner tip: start with 3–5 focused questions. You can add, remove or change them before publishing.</p>
     <div class="panel editor-panel email-editor">
       <p class="eyebrow">AUTOMATIC FOLLOW-UP</p><h2>Confirmation email</h2><p class="muted">The first email question is used as the recipient. Use {email}, {form_title}, event placeholders such as {event_date}, {event_time}, {event_location}, or a question ID such as {name}.</p>
       <label class="field-label" for="confirmation_subject">Email subject</label><input id="confirmation_subject" name="confirmation_subject" maxlength="200" required value="{{ request.form.get('confirmation_subject', form.confirmation_subject if form else 'Thanks for your response') }}">

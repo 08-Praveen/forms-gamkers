@@ -6,6 +6,15 @@
     <div><p class="eyebrow">YOUR WORKSPACE / {{ current_user.organization.name|upper }}</p><h1>Good to have you back, <span class="accent-text">{{ current_user.name.split(' ')[0] }}.</span></h1><p class="muted">Create forms, gather responses, and keep your team moving.</p></div>
     <a class="button button-primary" href="{{ url_for('forms.create_form') }}">＋ Create a form</a>
   </div>
+  <section class="welcome-guide" aria-labelledby="welcome-guide-title">
+    <div class="welcome-guide-copy"><span class="guide-sparkle">✦</span><div><p class="eyebrow">QUICK START GUIDE</p><h2 id="welcome-guide-title">Your workspace, in three steps</h2><p>New to Gamkers? Use this simple path to go from your first draft to your first response.</p></div></div>
+    <div class="welcome-guide-steps">
+      <div><span>1</span><b>Create</b><small>Give your form a title and add questions.</small></div>
+      <div><span>2</span><b>Publish</b><small>Check your form, then make it available.</small></div>
+      <div><span>3</span><b>Review</b><small>Share the link and check incoming responses.</small></div>
+    </div>
+    <a class="guide-help-link" href="{{ url_for('main.home') }}#getting-started">See the visual beginner guide ↗</a>
+  </section>
   <div class="stat-grid">
     <div class="stat-card"><span>YOUR FORMS</span><strong>{{ forms|length }}</strong><small>Across this organisation</small></div>
     <div class="stat-card"><span>RESPONSES</span><strong>{{ total_responses }}</strong><small>Collected across all forms</small></div>

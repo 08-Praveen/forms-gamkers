@@ -2,6 +2,7 @@
   "name": "forms-gamkers",
   "private": true,
   "scripts": {
+    "build": "npm run build:css",
     "build:css": "npx @tailwindcss/cli -i ./tailwind/app.css -o ./app/static/css/app.css --minify",
     "watch:css": "npx @tailwindcss/cli -i ./tailwind/app.css -o ./app/static/css/app.css --watch"
   },
