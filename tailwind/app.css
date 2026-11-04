@@ -1,5 +1,4 @@
 @import "tailwindcss" source(none);
-@import "./frontend-enhancements.css";
 @source "../app/templates/**/*.html";
 @source "../app/static/js/**/*.js";
 
